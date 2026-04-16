@@ -12,6 +12,7 @@ app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
 
+// RSS取得
 async function fetchRSS(url) {
   try {
     const res = await fetch(
@@ -23,20 +24,21 @@ async function fetchRSS(url) {
       return [];
     }
 
-    return data.items.slice(0, 5).map((i) => ({
-      title: i.title || "",
-      link: i.link || "",
+    return data.items.slice(0, 5).map((item) => ({
+      title: item.title || "",
+      link: item.link || "",
     }));
-  } catch (e) {
-    console.error("RSS fetch error:", url, e);
+  } catch (error) {
+    console.error("RSS fetch error:", url, error);
     return [];
   }
 }
 
+// 記事パース
 function parseArticle(text) {
   const get = (key) => {
-    const m = text.match(new RegExp(`【${key}】([\\s\\S]*?)(?=【|$)`));
-    return m ? m[1].trim() : "";
+    const match = text.match(new RegExp(`【${key}】([\\s\\S]*?)(?=【|$)`));
+    return match ? match[1].trim() : "";
   };
 
   return {
@@ -47,6 +49,7 @@ function parseArticle(text) {
   };
 }
 
+// ニュースAPI
 app.get("/api/news", async (req, res) => {
   try {
     const tag = req.query.tag || "AI";
@@ -60,28 +63,29 @@ app.get("/api/news", async (req, res) => {
       },
     ];
 
-    const all = await Promise.all(sources.map((s) => fetchRSS(s.url)));
+    const all = await Promise.all(sources.map((source) => fetchRSS(source.url)));
 
     const cleaned = all.map((items) =>
       items
-        .map((a) => a.title)
-        .filter((t) => typeof t === "string" && t.length > 10)
+        .map((item) => item.title)
+        .filter((title) => typeof title === "string" && title.length > 10)
         .slice(0, 3)
     );
 
-    const text = sources
-      .map(
-        (s, i) =>
-          `[${i + 1}] ${s.name}\n` +
-          (cleaned[i].length ? cleaned[i].map((t) => `- ${t}`).join("\n") : "- 該当ニュースなし")
-      )
+    const sourceText = sources
+      .map((source, index) => {
+        const lines = cleaned[index].length
+          ? cleaned[index].map((title) => `- ${title}`).join("\n")
+          : "- 該当ニュースなし";
+        return `[${index + 1}] ${source.name}\n${lines}`;
+      })
       .join("\n\n");
 
     const prompt = `
 あなたはプロのニュース編集者です。
 以下の複数ニュースを読み、1本の読みやすい記事に整理してください。
 
-${text}
+${sourceText}
 
 必ず次の形式で返してください。
 
@@ -99,12 +103,18 @@ ${text}
 `;
 
     const aiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_KEY}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [
+            {
+              parts: [{ text: prompt }],
+            },
+          ],
         }),
       }
     );
@@ -117,7 +127,7 @@ ${text}
         title: "Geminiエラー",
         summary: `APIエラー: ${aiRes.status}`,
         body: aiText.slice(0, 500),
-        points: "・APIキーや利用制限を確認してください",
+        points: "・APIキーやモデル名、利用制限を確認してください",
         sources,
       });
     }
@@ -125,7 +135,7 @@ ${text}
     let aiData;
     try {
       aiData = JSON.parse(aiText);
-    } catch (e) {
+    } catch (error) {
       console.error("Gemini JSON parse error:", aiText);
       return res.status(500).json({
         title: "AIレスポンス解析エラー",
@@ -136,24 +146,22 @@ ${text}
       });
     }
 
-    const raw =
-      aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
+    const raw = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = parseArticle(raw);
 
-    res.json({
+    return res.json({
       title: parsed.title || `${tag}の最新ニュース`,
       summary: parsed.summary || "AIの要約を取得できませんでした。",
       body: parsed.body || raw || "本文を生成できませんでした。",
       points: parsed.points || "・AI出力形式が想定と異なりました",
       sources,
     });
-  } catch (e) {
-    console.error("Server route error:", e);
-    res.status(500).json({
+  } catch (error) {
+    console.error("Server route error:", error);
+    return res.status(500).json({
       title: "サーバーエラー",
       summary: "ニュースの生成に失敗しました。",
-      body: String(e),
+      body: String(error),
       points: "・server.js のログを確認してください",
       sources: [],
     });
