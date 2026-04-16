@@ -5,7 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>NewsAI</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
 
     :root {
       --bg: #f2f2f7;
@@ -14,8 +19,8 @@
       --sub: #8e8e93;
       --border: #e5e5ea;
       --accent: #007aff;
-      --tabbar: rgba(249,249,249,.94);
-      --shadow: 0 1px 4px rgba(0,0,0,.08);
+      --tabbar: rgba(249, 249, 249, 0.94);
+      --shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     }
 
     [data-theme="dark"] {
@@ -25,8 +30,8 @@
       --sub: #8e8e93;
       --border: #38383a;
       --accent: #0a84ff;
-      --tabbar: rgba(28,28,30,.94);
-      --shadow: 0 1px 6px rgba(0,0,0,.35);
+      --tabbar: rgba(28, 28, 30, 0.94);
+      --shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
     }
 
     body {
@@ -159,7 +164,7 @@
 
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .card-img {
@@ -196,6 +201,17 @@
       font-size: 12px;
       font-weight: 700;
       line-height: 1.45;
+      margin-bottom: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-desc {
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--sub);
       margin-bottom: 6px;
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -245,6 +261,7 @@
     }
 
     .tab-icon { font-size: 18px; }
+
     .tab-label {
       font-size: 9px;
       color: var(--sub);
@@ -416,6 +433,13 @@
       font-size: 10px;
       color: var(--sub);
       text-decoration: none;
+    }
+
+    .source-title {
+      font-size: 10px;
+      line-height: 1.4;
+      color: var(--text);
+      margin-bottom: 3px;
     }
 
     .chat-section {
@@ -754,7 +778,6 @@
   </style>
 </head>
 <body>
-
   <div class="header" id="mainHeader">
     <div class="header-row">
       <div class="app-title">NewsAI</div>
@@ -815,7 +838,7 @@
           </div>
           <div class="settings-row">
             <div class="settings-left"><span>✨</span>バージョン</div>
-            <div class="settings-val">4.2</div>
+            <div class="settings-val">5.0</div>
           </div>
         </div>
       </div>
@@ -858,7 +881,7 @@
       <div class="art-text" id="articleBody"></div>
 
       <div class="analysis">
-        <div class="analysis-title">🤖 AI分析・見通し</div>
+        <div class="analysis-title">🤖 AI分析・要点</div>
         <div class="analysis-text" id="articlePoints"></div>
       </div>
     </div>
@@ -1008,31 +1031,41 @@
         const res = await fetch(`/api/news?tag=${encodeURIComponent(tag)}`);
         const data = await res.json();
 
-        const article = {
-          id: tag,
-          tag,
-          icon: getIcon(tag),
-          title: data.title || `${tag}の最新ニュース`,
-          summary: data.summary || "",
-          body: data.body || "",
-          points: data.points || "",
-          sources: data.sources || [],
-          time: "たった今"
-        };
+        const topics = Array.isArray(data.topics) ? data.topics : [];
 
-        state.cache[tag] = [article];
-        renderArticleCards([article]);
+        const articles = topics.map((topic, index) => ({
+          id: topic.id || `${tag}-${index + 1}`,
+          tag: topic.tag || tag,
+          icon: getIcon(topic.tag || tag),
+          title: topic.title || `${tag}の話題`,
+          summary: topic.summary || "",
+          body: topic.body || "",
+          points: topic.points || "",
+          sources: topic.sources || [],
+          time: "たった今"
+        }));
+
+        state.cache[tag] = articles;
+        renderArticleCards(articles);
       } catch (e) {
+        console.error(e);
         list.innerHTML = `<div class="empty">記事の取得に失敗しました</div>`;
       }
     }
 
     function renderArticleCards(items) {
       const list = document.getElementById("articlesList");
+
+      if (!items.length) {
+        list.innerHTML = `<div class="empty">表示できるトピックがありません</div>`;
+        return;
+      }
+
       list.innerHTML = "";
 
       items.forEach((item, index) => {
         const isSaved = state.saved.some(s => s.id === item.id);
+
         const el = document.createElement("div");
         el.className = "card";
         el.style.animationDelay = `${index * 60}ms`;
@@ -1041,6 +1074,7 @@
           <div class="card-body">
             <div class="badge">🤖 AI生成 · ${escapeHtml(item.tag)}</div>
             <div class="card-title">${escapeHtml(item.title)}</div>
+            <div class="card-desc">${escapeHtml(item.summary || "")}</div>
             <div class="card-footer">
               <span>${item.time}</span>
               <span class="save-btn">${isSaved ? "🔖✓" : "🔖"}</span>
@@ -1080,12 +1114,14 @@
 
     function renderSaved() {
       const list = document.getElementById("savedList");
+
       if (!state.saved.length) {
         list.innerHTML = `<div class="empty">保存した記事はまだありません</div>`;
         return;
       }
 
       list.innerHTML = "";
+
       state.saved.forEach((item, index) => {
         const el = document.createElement("div");
         el.className = "card";
@@ -1095,6 +1131,7 @@
           <div class="card-body">
             <div class="badge">🤖 AI生成 · ${escapeHtml(item.tag || "")}</div>
             <div class="card-title">${escapeHtml(item.title || "")}</div>
+            <div class="card-desc">${escapeHtml(item.summary || "")}</div>
             <div class="card-footer">
               <span>${item.time || "保存済み"}</span>
               <span class="save-btn">🔖✓</span>
@@ -1114,6 +1151,7 @@
 
     function openArticle(article) {
       state.currentArticle = article;
+
       document.getElementById("overlayTitleMini").textContent = article.title;
       document.getElementById("articleHero").textContent = article.icon || "📰";
       document.getElementById("articleBadge").textContent = `🤖 Gemini生成記事 · ${article.tag}`;
@@ -1127,11 +1165,13 @@
 
       const sourcesWrap = document.getElementById("articleSources");
       sourcesWrap.innerHTML = "";
+
       (article.sources || []).forEach(src => {
         const div = document.createElement("div");
         div.className = "source-item";
         div.innerHTML = `
           <div class="source-name">${escapeHtml(src.name || "Source")}</div>
+          <div class="source-title">${escapeHtml(src.title || "")}</div>
           <a class="source-link" href="${src.url || "#"}" target="_blank" rel="noopener">元記事を開く</a>
         `;
         sourcesWrap.appendChild(div);
@@ -1253,6 +1293,7 @@
     function addTag() {
       const input = document.getElementById("newTagInput");
       const value = input.value.trim();
+
       if (!value || state.tags.includes(value)) return;
 
       state.tags.push(value);
