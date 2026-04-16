@@ -815,7 +815,7 @@
           </div>
           <div class="settings-row">
             <div class="settings-left"><span>✨</span>バージョン</div>
-            <div class="settings-val">4.0</div>
+            <div class="settings-val">4.2</div>
           </div>
         </div>
       </div>
@@ -905,6 +905,7 @@
   </div>
 
   <script>
+    const DEFAULT_TAGS = ["AI", "半導体", "経済", "日本"];
     const SUGGEST_TAGS = ["国内", "国際", "テクノロジー", "ビジネス", "半導体", "AI・人工知能", "宇宙開発", "株式市場", "円安", "エンタメ"];
 
     const ICONS = {
@@ -916,7 +917,6 @@
       "国際": "🌏",
       "テクノロジー": "🧠",
       "ビジネス": "📈",
-      "半導体": "💻",
       "AI・人工知能": "🤖",
       "株式市場": "💹",
       "円安": "💴",
@@ -925,7 +925,7 @@
     };
 
     const state = {
-      tags: JSON.parse(localStorage.getItem("newsai_tags") || "null") || ["AI", "半導体", "経済", "日本"],
+      tags: JSON.parse(localStorage.getItem("newsai_tags") || "null") || [...DEFAULT_TAGS],
       activeTag: JSON.parse(localStorage.getItem("newsai_active") || '"AI"'),
       cache: {},
       currentArticle: null,
@@ -955,9 +955,33 @@
       localStorage.setItem("newsai_active", JSON.stringify(state.activeTag));
     }
 
+    function normalizeTags() {
+      if (!Array.isArray(state.tags) || state.tags.length === 0) {
+        state.tags = [...DEFAULT_TAGS];
+      }
+
+      state.tags = state.tags
+        .filter(tag => typeof tag === "string")
+        .map(tag => tag.trim())
+        .filter(Boolean);
+
+      state.tags = [...new Set(state.tags)];
+
+      if (state.tags.length === 0) {
+        state.tags = [...DEFAULT_TAGS];
+      }
+
+      if (!state.tags.includes(state.activeTag)) {
+        state.activeTag = state.tags[0];
+      }
+
+      saveTags();
+    }
+
     function renderTags() {
       const bar = document.getElementById("tagBar");
       bar.innerHTML = "";
+
       state.tags.forEach(tag => {
         const el = document.createElement("div");
         el.className = "tag" + (tag === state.activeTag ? " active" : "");
@@ -1023,11 +1047,13 @@
             </div>
           </div>
         `;
+
         el.querySelector(".save-btn").onclick = (ev) => {
           ev.stopPropagation();
           toggleSave(item);
           renderArticleCards(items);
         };
+
         el.onclick = () => openArticle(item);
         list.appendChild(el);
       });
@@ -1037,10 +1063,13 @@
       const idx = state.saved.findIndex(s => s.id === article.id);
       if (idx >= 0) state.saved.splice(idx, 1);
       else state.saved.unshift(article);
+
       localStorage.setItem("newsai_saved", JSON.stringify(state.saved));
       renderSaved();
+
       if (state.currentArticle?.id === article.id) {
-        document.getElementById("overlaySaveBtn").textContent = state.saved.some(s => s.id === article.id) ? "🔖✓" : "🔖";
+        document.getElementById("overlaySaveBtn").textContent =
+          state.saved.some(s => s.id === article.id) ? "🔖✓" : "🔖";
       }
     }
 
@@ -1072,10 +1101,12 @@
             </div>
           </div>
         `;
+
         el.querySelector(".save-btn").onclick = (ev) => {
           ev.stopPropagation();
           toggleSave(item);
         };
+
         el.onclick = () => openArticle(item);
         list.appendChild(el);
       });
@@ -1091,7 +1122,8 @@
       document.getElementById("articleLead").textContent = article.summary || "要約はまだありません。";
       document.getElementById("articleBody").textContent = article.body || "本文はまだありません。";
       document.getElementById("articlePoints").textContent = article.points || "・ポイントはまだありません";
-      document.getElementById("overlaySaveBtn").textContent = state.saved.some(s => s.id === article.id) ? "🔖✓" : "🔖";
+      document.getElementById("overlaySaveBtn").textContent =
+        state.saved.some(s => s.id === article.id) ? "🔖✓" : "🔖";
 
       const sourcesWrap = document.getElementById("articleSources");
       sourcesWrap.innerHTML = "";
@@ -1105,7 +1137,8 @@
         sourcesWrap.appendChild(div);
       });
 
-      document.getElementById("chatMsgs").innerHTML = `<div class="bubble ai">この記事について気になることを入力してください。</div>`;
+      document.getElementById("chatMsgs").innerHTML =
+        `<div class="bubble ai">この記事について気になることを入力してください。</div>`;
       document.getElementById("chatInput").value = "";
       document.getElementById("overlay").classList.add("open");
       document.body.style.overflow = "hidden";
@@ -1122,6 +1155,7 @@
       if (!value) return;
 
       const wrap = document.getElementById("chatMsgs");
+
       const user = document.createElement("div");
       user.className = "bubble user";
       user.textContent = value;
@@ -1129,7 +1163,6 @@
 
       const ai = document.createElement("div");
       ai.className = "bubble ai";
-
       const title = state.currentArticle?.title || "この記事";
       ai.textContent = `「${title}」については、今は簡易版です。次に本格的な記事チャット機能も追加できます。`;
       wrap.appendChild(ai);
@@ -1157,7 +1190,9 @@
 
     function closeTagModal() {
       document.getElementById("tagModal").classList.remove("open");
+      normalizeTags();
       renderTags();
+      loadArticles(state.activeTag);
     }
 
     function handleBackdrop(e) {
@@ -1167,6 +1202,7 @@
     function renderTagEditor() {
       const tagsEdit = document.getElementById("tagsEdit");
       tagsEdit.innerHTML = "";
+
       state.tags.forEach((tag, idx) => {
         const el = document.createElement("div");
         el.className = "tag-chip";
@@ -1175,30 +1211,40 @@
           <span>${escapeHtml(tag)}</span>
           <button class="delete-chip">×</button>
         `;
+
         el.querySelector(".delete-chip").onclick = () => {
           if (state.tags.length === 1) return;
+
           const removed = state.tags[idx];
           state.tags.splice(idx, 1);
-          if (state.activeTag === removed) state.activeTag = state.tags[0];
-          saveTags();
+
+          if (state.activeTag === removed) {
+            state.activeTag = state.tags[0] || DEFAULT_TAGS[0];
+          }
+
+          normalizeTags();
           renderTagEditor();
           renderTags();
           loadArticles(state.activeTag);
         };
+
         tagsEdit.appendChild(el);
       });
 
       const suggests = document.getElementById("suggests");
       suggests.innerHTML = "";
-      SUGGEST_TAGS.filter(t => !state.tags.includes(t)).forEach(tag => {
+
+      SUGGEST_TAGS.filter(tag => !state.tags.includes(tag)).forEach(tag => {
         const el = document.createElement("div");
         el.className = "suggest";
         el.textContent = tag;
         el.onclick = () => {
           state.tags.push(tag);
-          saveTags();
+          state.activeTag = tag;
+          normalizeTags();
           renderTagEditor();
           renderTags();
+          loadArticles(state.activeTag);
         };
         suggests.appendChild(el);
       });
@@ -1208,11 +1254,15 @@
       const input = document.getElementById("newTagInput");
       const value = input.value.trim();
       if (!value || state.tags.includes(value)) return;
+
       state.tags.push(value);
+      state.activeTag = value;
       input.value = "";
-      saveTags();
+
+      normalizeTags();
       renderTagEditor();
       renderTags();
+      loadArticles(state.activeTag);
     }
 
     function initWeatherMock() {
@@ -1225,15 +1275,11 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      normalizeTags();
       applyTheme();
       renderTags();
       renderSaved();
       initWeatherMock();
-
-      if (!state.tags.includes(state.activeTag)) {
-        state.activeTag = state.tags[0];
-      }
-
       loadArticles(state.activeTag);
     });
   </script>
