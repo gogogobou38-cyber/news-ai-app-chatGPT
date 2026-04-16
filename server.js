@@ -22,7 +22,7 @@ async function fetchRSS(url, sourceName) {
 
     if (!data.items || !Array.isArray(data.items)) return [];
 
-    return data.items.slice(0, 8).map((item) => ({
+    return data.items.slice(0, 6).map((item) => ({
       title: item.title || "",
       link: item.link || "",
       pubDate: item.pubDate || "",
@@ -34,7 +34,7 @@ async function fetchRSS(url, sourceName) {
   }
 }
 
-// AIレスポンスからJSONだけ抜く
+// GeminiレスポンスからJSON抽出
 function extractJson(text) {
   const fenced = text.match(/```json\s*([\s\S]*?)```/i);
   if (fenced) return fenced[1].trim();
@@ -97,15 +97,15 @@ function getSourcesByTag(tag) {
   ];
 }
 
-// 見出しの簡易整形
+// 見出し整形
 function cleanupItems(items) {
   return items
-    .filter(item => item.title && item.title.length >= 8)
-    .map(item => ({
+    .filter((item) => item.title && item.title.length >= 8)
+    .map((item) => ({
       ...item,
-      title: item.title.replace(/\s+/g, " ").trim()
+      title: item.title.replace(/\s+/g, " ").trim(),
     }))
-    .slice(0, 20);
+    .slice(0, 14);
 }
 
 // Gemini呼び出し
@@ -114,10 +114,12 @@ async function callGemini(prompt) {
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_KEY}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
     }
   );
 
@@ -144,22 +146,24 @@ app.get("/api/news", async (req, res) => {
     const sources = getSourcesByTag(tag);
 
     const fetched = await Promise.all(
-      sources.map(source => fetchRSS(source.url, source.name))
+      sources.map((source) => fetchRSS(source.url, source.name))
     );
 
     const allItems = cleanupItems(fetched.flat());
 
     if (!allItems.length) {
       return res.json({
-        topics: [{
-          id: `${tag}-empty`,
-          tag,
-          title: `${tag}のニュースを取得できませんでした`,
-          summary: "ソース取得に失敗したか、該当ニュースがありませんでした。",
-          body: "しばらくしてから再読み込みしてください。",
-          points: "・RSS取得に失敗\n・ニュースが少ない可能性\n・タグ名を変えると改善する場合があります",
-          sources: []
-        }]
+        topics: [
+          {
+            id: `${tag}-empty`,
+            tag,
+            title: `${tag}のニュースを取得できませんでした`,
+            summary: "ソース取得に失敗したか、該当ニュースがありませんでした。",
+            body: "しばらくしてから再読み込みしてください。",
+            points: "・RSS取得に失敗した可能性\n・該当ニュースが少ない可能性",
+            sources: [],
+          },
+        ],
       });
     }
 
@@ -168,14 +172,17 @@ app.get("/api/news", async (req, res) => {
       .join("\n");
 
     const prompt = `
-あなたは優秀なニュース編集者です。
-以下の見出し群を、「同じ話題ごと」に3〜5個のトピックへ分類してください。
+あなたはニュース整理AIです。
+以下のニュース見出しを読み、同じ話題ごとに最大3トピックへ分類してください。
+その上で、各トピックについて短い要約を作ってください。
 
-条件:
+ルール:
 - 別の話題は絶対に混ぜない
-- 似ているニュースだけ同じトピックにまとめる
-- 1トピックにつき最低2件、できれば複数ソースを含める
-- 日本語で返す
+- 似ているニュースだけを同じトピックにまとめる
+- 最大3トピック
+- 日本語
+- 長文記事は書かない
+- 簡潔に
 - 出力はJSONのみ
 - コードブロックなし
 
@@ -186,116 +193,93 @@ ${headlinesText}
 {
   "topics": [
     {
-      "topic_title": "トピック名",
+      "topic_title": "話題タイトル",
+      "summary": "短い要約",
+      "points": "・ポイント1\\n・ポイント2\\n・ポイント3",
       "headline_numbers": [1,2,5]
     }
   ]
 }
 `;
 
-    const clusterRaw = await callGemini(prompt);
-    const clusterJson = extractJson(clusterRaw);
+    const raw = await callGemini(prompt);
+    const jsonText = extractJson(raw);
 
-    let clustered;
+    let parsed;
     try {
-      clustered = JSON.parse(clusterJson);
+      parsed = JSON.parse(jsonText);
     } catch (e) {
-      console.error("cluster parse error:", clusterRaw);
-      throw new Error("トピック分類の解析に失敗しました");
+      console.error("JSON parse error:", raw);
+      throw new Error("AIレスポンスの解析に失敗しました");
     }
 
-    const topics = [];
-    const topicList = Array.isArray(clustered.topics) ? clustered.topics : [];
+    let topicList = Array.isArray(parsed.topics) ? parsed.topics : [];
 
-    for (let i = 0; i < topicList.length; i++) {
-      const topic = topicList[i];
+    // 保険：1個しか返ってこなかった時の最低限分割
+    if (topicList.length <= 1 && allItems.length >= 6) {
+      topicList = [
+        {
+          topic_title: "主要トピック 1",
+          summary: "注目ニュースを整理した要約です。",
+          points: "・主要見出しを整理\n・同テーマを集約\n・詳細は元記事参照",
+          headline_numbers: [1, 2]
+        },
+        {
+          topic_title: "主要トピック 2",
+          summary: "関連ニュースをまとめた要約です。",
+          points: "・関連見出しを整理\n・別トピックとして分離\n・詳細は元記事参照",
+          headline_numbers: [3, 4]
+        },
+        {
+          topic_title: "主要トピック 3",
+          summary: "別の話題として整理した要約です。",
+          points: "・独立した話題を分離\n・重要点を抽出\n・詳細は元記事参照",
+          headline_numbers: [5, 6]
+        }
+      ];
+    }
+
+    const topics = topicList.slice(0, 3).map((topic, index) => {
       const nums = Array.isArray(topic.headline_numbers)
         ? topic.headline_numbers
-            .map(n => Number(n))
-            .filter(n => Number.isInteger(n) && n >= 1 && n <= allItems.length)
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 1 && n <= allItems.length)
         : [];
 
-      const groupedItems = nums.map(n => allItems[n - 1]).filter(Boolean);
+      const groupedItems = nums.map((n) => allItems[n - 1]).filter(Boolean);
 
-      if (groupedItems.length === 0) continue;
-
-      const groupedText = groupedItems
-        .map((item, idx) => {
-          return `[${idx + 1}] ${item.source}\nタイトル: ${item.title}\nURL: ${item.link}`;
-        })
-        .join("\n\n");
-
-      const articlePrompt = `
-あなたはプロのニュース編集者です。
-以下は「${topic.topic_title || tag}」に関する同一トピックの複数ニュースです。
-別話題は混ぜず、同一テーマだけで1本の記事を作成してください。
-
-入力:
-${groupedText}
-
-条件:
-- 日本語
-- 同じ話題だけで書く
-- 事実ベース
-- 憶測で話を広げない
-- 読みやすく簡潔
-- 出力はJSONのみ
-- コードブロックなし
-
-返却JSON形式:
-{
-  "title": "記事タイトル",
-  "summary": "80文字前後の要約",
-  "body": "本文。2〜4段落。",
-  "points": "・ポイント1\\n・ポイント2\\n・ポイント3"
-}
-`;
-
-      const articleRaw = await callGemini(articlePrompt);
-      const articleJson = extractJson(articleRaw);
-
-      let parsedArticle;
-      try {
-        parsedArticle = JSON.parse(articleJson);
-      } catch {
-        parsedArticle = {
-          title: topic.topic_title || `${tag}の話題`,
-          summary: "記事生成に失敗しました。",
-          body: articleRaw || "記事本文を生成できませんでした。",
-          points: "・AI出力の解析に失敗しました"
-        };
-      }
-
-      topics.push({
-        id: `${tag}-${i + 1}`,
+      return {
+        id: `${tag}-${index + 1}`,
         tag,
-        title: parsedArticle.title || topic.topic_title || `${tag}の話題`,
-        summary: parsedArticle.summary || "",
-        body: parsedArticle.body || "",
-        points: parsedArticle.points || "",
-        sources: groupedItems.map(item => ({
+        title: topic.topic_title || `${tag}の話題`,
+        summary: topic.summary || "",
+        body: topic.summary || "",
+        points: topic.points || "・詳細は元記事を確認してください",
+        sources: groupedItems.map((item) => ({
           name: item.source,
           url: item.link,
-          title: item.title
-        }))
-      });
-    }
+          title: item.title,
+        })),
+      };
+    }).filter((topic) => topic.sources.length > 0);
 
     if (!topics.length) {
       return res.json({
-        topics: [{
-          id: `${tag}-fallback`,
-          tag,
-          title: `${tag}の主要トピック`,
-          summary: "トピック分類に失敗したため、暫定記事を表示しています。",
-          body: allItems.map(item => `・${item.source}: ${item.title}`).join("\n"),
-          points: "・分類処理に失敗\n・見出し一覧を表示\n・再試行で改善する場合があります",
-          sources: allItems.slice(0, 5).map(item => ({
-            name: item.source,
-            url: item.link,
-            title: item.title
-          }))
-        }]
+        topics: [
+          {
+            id: `${tag}-fallback`,
+            tag,
+            title: `${tag}の主要ニュース`,
+            summary: "AI分類に失敗したため、ニュース一覧を表示しています。",
+            body: "AI分類に失敗したため、ニュース一覧を表示しています。",
+            points: allItems.slice(0, 5).map((item) => `・${item.title}`).join("\n"),
+            sources: allItems.slice(0, 5).map((item) => ({
+              name: item.source,
+              url: item.link,
+              title: item.title,
+            })),
+          },
+        ],
       });
     }
 
@@ -303,15 +287,17 @@ ${groupedText}
   } catch (error) {
     console.error("Server route error:", error);
     return res.status(500).json({
-      topics: [{
-        id: "error",
-        tag: "error",
-        title: "サーバーエラー",
-        summary: "ニュースの生成に失敗しました。",
-        body: String(error),
-        points: "・server.js のログを確認してください",
-        sources: []
-      }]
+      topics: [
+        {
+          id: "error",
+          tag: "error",
+          title: "サーバーエラー",
+          summary: "ニュースの生成に失敗しました。",
+          body: String(error),
+          points: "・server.js のログを確認してください",
+          sources: [],
+        },
+      ],
     });
   }
 });
