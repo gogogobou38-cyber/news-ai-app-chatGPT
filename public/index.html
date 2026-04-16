@@ -19,6 +19,7 @@
       --sub: #8e8e93;
       --border: #e5e5ea;
       --accent: #007aff;
+      --danger: #ff3b30;
       --tabbar: rgba(249, 249, 249, 0.94);
       --shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     }
@@ -30,6 +31,7 @@
       --sub: #8e8e93;
       --border: #38383a;
       --accent: #0a84ff;
+      --danger: #ff453a;
       --tabbar: rgba(28, 28, 30, 0.94);
       --shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
     }
@@ -149,6 +151,39 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+    }
+
+    .swipe-wrap {
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    .swipe-delete {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 82px;
+      height: 100%;
+      background: var(--danger);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      z-index: 1;
+    }
+
+    .swipe-card {
+      position: relative;
+      z-index: 2;
+      transition: transform .2s ease;
+      touch-action: pan-y;
+    }
+
+    .swipe-card.open {
+      transform: translateX(-82px);
     }
 
     .card {
@@ -618,6 +653,12 @@
       font-size: 12px;
     }
 
+    .section-note {
+      font-size: 11px;
+      color: var(--sub);
+      padding: 8px 12px 0;
+    }
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -795,8 +836,9 @@
       <div class="articles" id="articlesList"></div>
     </div>
 
-    <div class="page" id="searchPage">
-      <div class="empty">検索機能はこれから追加できます</div>
+    <div class="page" id="historyPage">
+      <div class="section-note">左にスワイプすると削除できます</div>
+      <div class="articles" id="historyList"></div>
     </div>
 
     <div class="page" id="savedPage">
@@ -834,11 +876,11 @@
           </div>
           <div class="settings-row">
             <div class="settings-left"><span>📰</span>ニュースソース</div>
-            <div class="settings-val">RSS + AI生成</div>
+            <div class="settings-val">RSS + AI分類</div>
           </div>
           <div class="settings-row">
-            <div class="settings-left"><span>✨</span>バージョン</div>
-            <div class="settings-val">5.0</div>
+            <div class="settings-left"><span>🕘</span>履歴保存</div>
+            <div class="settings-val">あり</div>
           </div>
         </div>
       </div>
@@ -850,9 +892,9 @@
       <div class="tab-icon">🏠</div>
       <div class="tab-label">ホーム</div>
     </div>
-    <div class="tab-item" id="tab-search" onclick="switchTab('search')">
-      <div class="tab-icon">🔍</div>
-      <div class="tab-label">検索</div>
+    <div class="tab-item" id="tab-history" onclick="switchTab('history')">
+      <div class="tab-icon">🕘</div>
+      <div class="tab-label">履歴</div>
     </div>
     <div class="tab-item" id="tab-saved" onclick="switchTab('saved')">
       <div class="tab-icon">🔖</div>
@@ -874,14 +916,14 @@
     <div class="hero" id="articleHero">📰</div>
 
     <div class="art-body">
-      <div class="badge" id="articleBadge">🤖 Gemini生成記事 · AI</div>
+      <div class="badge" id="articleBadge">🤖 Gemini分類 · AI</div>
       <div class="art-title" id="articleTitle"></div>
       <div class="art-meta" id="articleMeta"></div>
       <div class="art-lead" id="articleLead"></div>
       <div class="art-text" id="articleBody"></div>
 
       <div class="analysis">
-        <div class="analysis-title">🤖 AI分析・要点</div>
+        <div class="analysis-title">🤖 AI整理ポイント</div>
         <div class="analysis-text" id="articlePoints"></div>
       </div>
     </div>
@@ -930,6 +972,7 @@
   <script>
     const DEFAULT_TAGS = ["AI", "半導体", "経済", "日本"];
     const SUGGEST_TAGS = ["国内", "国際", "テクノロジー", "ビジネス", "半導体", "AI・人工知能", "宇宙開発", "株式市場", "円安", "エンタメ"];
+    const HISTORY_LIMIT = 100;
 
     const ICONS = {
       "AI": "🤖",
@@ -953,6 +996,7 @@
       cache: {},
       currentArticle: null,
       saved: JSON.parse(localStorage.getItem("newsai_saved") || "[]"),
+      history: JSON.parse(localStorage.getItem("newsai_history") || "[]"),
       dark: localStorage.getItem("newsai_dark") === "true"
     };
 
@@ -960,6 +1004,14 @@
       const div = document.createElement("div");
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function persistHistory() {
+      localStorage.setItem("newsai_history", JSON.stringify(state.history));
+    }
+
+    function persistSaved() {
+      localStorage.setItem("newsai_saved", JSON.stringify(state.saved));
     }
 
     function applyTheme() {
@@ -1023,6 +1075,24 @@
       return ICONS[tag] || "📰";
     }
 
+    function mergeIntoHistory(articles) {
+      const incoming = [...articles].map(article => ({
+        ...article,
+        fetchedAt: new Date().toISOString()
+      }));
+
+      const merged = [...incoming, ...state.history].reduce((acc, item) => {
+        if (!acc.find(x => x.id === item.id)) {
+          acc.push(item);
+        }
+        return acc;
+      }, []);
+
+      state.history = merged.slice(0, HISTORY_LIMIT);
+      persistHistory();
+      renderHistory();
+    }
+
     async function loadArticles(tag) {
       const list = document.getElementById("articlesList");
       list.innerHTML = `<div class="loading">読み込み中…</div>`;
@@ -1039,7 +1109,7 @@
           icon: getIcon(topic.tag || tag),
           title: topic.title || `${tag}の話題`,
           summary: topic.summary || "",
-          body: topic.body || "",
+          body: topic.body || topic.summary || "",
           points: topic.points || "",
           sources: topic.sources || [],
           time: "たった今"
@@ -1047,6 +1117,7 @@
 
         state.cache[tag] = articles;
         renderArticleCards(articles);
+        mergeIntoHistory(articles);
       } catch (e) {
         console.error(e);
         list.innerHTML = `<div class="empty">記事の取得に失敗しました</div>`;
@@ -1072,7 +1143,7 @@
         el.innerHTML = `
           <div class="card-img">${item.icon}</div>
           <div class="card-body">
-            <div class="badge">🤖 AI生成 · ${escapeHtml(item.tag)}</div>
+            <div class="badge">🤖 AI分類 · ${escapeHtml(item.tag)}</div>
             <div class="card-title">${escapeHtml(item.title)}</div>
             <div class="card-desc">${escapeHtml(item.summary || "")}</div>
             <div class="card-footer">
@@ -1093,13 +1164,72 @@
       });
     }
 
+    function makeSwipeHistoryCard(item, index) {
+      const wrap = document.createElement("div");
+      wrap.className = "swipe-wrap";
+      wrap.style.animationDelay = `${index * 50}ms`;
+
+      wrap.innerHTML = `
+        <div class="swipe-delete">削除</div>
+        <div class="swipe-card">
+          <div class="card">
+            <div class="card-img">${item.icon || "📰"}</div>
+            <div class="card-body">
+              <div class="badge">🕘 履歴 · ${escapeHtml(item.tag || "")}</div>
+              <div class="card-title">${escapeHtml(item.title || "")}</div>
+              <div class="card-desc">${escapeHtml(item.summary || "")}</div>
+              <div class="card-footer">
+                <span>${item.time || "取得済み"}</span>
+                <span class="save-btn">${state.saved.some(s => s.id === item.id) ? "🔖✓" : "🔖"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const swipeCard = wrap.querySelector(".swipe-card");
+      const deleteBtn = wrap.querySelector(".swipe-delete");
+      const saveBtn = wrap.querySelector(".save-btn");
+
+      attachSwipe(swipeCard);
+
+      deleteBtn.onclick = () => {
+        deleteHistoryArticle(item.id);
+      };
+
+      saveBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        toggleSave(item);
+        renderHistory();
+      };
+
+      swipeCard.onclick = () => openArticle(item);
+
+      return wrap;
+    }
+
+    function renderHistory() {
+      const list = document.getElementById("historyList");
+
+      if (!state.history.length) {
+        list.innerHTML = `<div class="empty">取得済みトピックはまだありません</div>`;
+        return;
+      }
+
+      list.innerHTML = "";
+      state.history.forEach((item, index) => {
+        list.appendChild(makeSwipeHistoryCard(item, index));
+      });
+    }
+
     function toggleSave(article) {
       const idx = state.saved.findIndex(s => s.id === article.id);
       if (idx >= 0) state.saved.splice(idx, 1);
       else state.saved.unshift(article);
 
-      localStorage.setItem("newsai_saved", JSON.stringify(state.saved));
+      persistSaved();
       renderSaved();
+      renderHistory();
 
       if (state.currentArticle?.id === article.id) {
         document.getElementById("overlaySaveBtn").textContent =
@@ -1110,6 +1240,12 @@
     function toggleCurrentSave() {
       if (!state.currentArticle) return;
       toggleSave(state.currentArticle);
+    }
+
+    function deleteHistoryArticle(id) {
+      state.history = state.history.filter(item => item.id !== id);
+      persistHistory();
+      renderHistory();
     }
 
     function renderSaved() {
@@ -1129,7 +1265,7 @@
         el.innerHTML = `
           <div class="card-img">${item.icon || "📰"}</div>
           <div class="card-body">
-            <div class="badge">🤖 AI生成 · ${escapeHtml(item.tag || "")}</div>
+            <div class="badge">🔖 保存済み · ${escapeHtml(item.tag || "")}</div>
             <div class="card-title">${escapeHtml(item.title || "")}</div>
             <div class="card-desc">${escapeHtml(item.summary || "")}</div>
             <div class="card-footer">
@@ -1154,7 +1290,7 @@
 
       document.getElementById("overlayTitleMini").textContent = article.title;
       document.getElementById("articleHero").textContent = article.icon || "📰";
-      document.getElementById("articleBadge").textContent = `🤖 Gemini生成記事 · ${article.tag}`;
+      document.getElementById("articleBadge").textContent = `🤖 AI分類 · ${article.tag}`;
       document.getElementById("articleTitle").textContent = article.title;
       document.getElementById("articleMeta").textContent = `NewsAI編集部 · ${new Date().toLocaleDateString("ja-JP")}`;
       document.getElementById("articleLead").textContent = article.summary || "要約はまだありません。";
@@ -1211,7 +1347,7 @@
     }
 
     function switchTab(tab) {
-      ["home", "search", "saved", "settings"].forEach(name => {
+      ["home", "history", "saved", "settings"].forEach(name => {
         document.getElementById(`${name}Page`).classList.toggle("active", name === tab);
         document.getElementById(`tab-${name}`).classList.toggle("active", name === tab);
       });
@@ -1221,6 +1357,7 @@
       document.getElementById("mainArea").style.paddingTop = isHome ? "138px" : "0";
 
       if (tab === "saved") renderSaved();
+      if (tab === "history") renderHistory();
     }
 
     function openTagModal() {
@@ -1315,11 +1452,49 @@
       document.getElementById("settingsLoc").textContent = "大阪市";
     }
 
+    function attachSwipe(cardEl) {
+      let startX = 0;
+      let deltaX = 0;
+      let isSwiping = false;
+
+      cardEl.addEventListener("touchstart", (e) => {
+        startX = e.touches[0].clientX;
+        deltaX = 0;
+        isSwiping = true;
+      }, { passive: true });
+
+      cardEl.addEventListener("touchmove", (e) => {
+        if (!isSwiping) return;
+        deltaX = e.touches[0].clientX - startX;
+
+        if (deltaX < 0) {
+          const move = Math.max(deltaX, -82);
+          cardEl.style.transform = `translateX(${move}px)`;
+        }
+      }, { passive: true });
+
+      cardEl.addEventListener("touchend", () => {
+        if (!isSwiping) return;
+
+        if (deltaX < -40) {
+          cardEl.classList.add("open");
+          cardEl.style.transform = "translateX(-82px)";
+        } else {
+          cardEl.classList.remove("open");
+          cardEl.style.transform = "translateX(0)";
+        }
+
+        isSwiping = false;
+        deltaX = 0;
+      });
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       normalizeTags();
       applyTheme();
       renderTags();
       renderSaved();
+      renderHistory();
       initWeatherMock();
       loadArticles(state.activeTag);
     });
