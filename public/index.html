@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NewsAI</title>
+<style>
+body{font-family:-apple-system;background:#f2f2f7;max-width:430px;margin:auto}
+.header{padding:20px;font-size:24px;font-weight:700}
+.tags{display:flex;gap:8px;padding:0 16px;overflow-x:auto}
+.tag{padding:6px 12px;border-radius:20px;background:#fff;border:1px solid #ddd;cursor:pointer}
+.tag.active{background:#007aff;color:#fff}
+.card{margin:16px;background:#fff;border-radius:12px;padding:14px}
+.overlay{position:fixed;inset:0;background:#fff;transform:translateX(100%);transition:.3s;padding:16px}
+.overlay.open{transform:translateX(0)}
+</style>
+</head>
+<body>
+
+<div class="header">NewsAI</div>
+<div class="tags" id="tags"></div>
+<div id="list"></div>
+
+<div class="overlay" id="overlay">
+  <button onclick="closeArt()">戻る</button>
+  <h2 id="title"></h2>
+  <p id="summary"></p>
+  <p id="body"></p>
+  <div id="points"></div>
+  <div id="sources"></div>
+</div>
+
+<script>
+const TAGS = ["AI","半導体","経済","日本"];
+let current;
+
+function renderTags(){
+  const el = document.getElementById("tags");
+  TAGS.forEach(t=>{
+    const d = document.createElement("div");
+    d.className="tag";
+    d.textContent=t;
+    d.onclick=()=>load(t);
+    el.appendChild(d);
+  });
+}
+
+async function load(tag){
+  const res = await fetch(`/api/news?tag=${tag}`);
+  const data = await res.json();
+  current = data;
+
+  document.getElementById("list").innerHTML = `
+    <div class="card" onclick="openArt()">
+      <h3>${data.title}</h3>
+      <p>${data.summary}</p>
+    </div>
+  `;
+}
+
+function openArt(){
+  document.getElementById("title").textContent = current.title;
+  document.getElementById("summary").textContent = current.summary;
+  document.getElementById("body").textContent = current.body;
+  document.getElementById("points").innerHTML = current.points;
+  document.getElementById("sources").innerHTML =
+    current.sources.map(s=>`<div>${s.name}</div>`).join("");
+  document.getElementById("overlay").classList.add("open");
+}
+
+function closeArt(){
+  document.getElementById("overlay").classList.remove("open");
+}
+
+renderTags();
+load("AI");
+</script>
+
+</body>
+</html>
